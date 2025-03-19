@@ -883,6 +883,9 @@ document.addEventListener("DOMContentLoaded", function() {
     let transformMode = false;
     let clonedElement = null;  // 복제된 요소를 저장할 변수
     let originalRect = null;   // 원본 요소의 위치와 크기 정보
+    let rotationAngle = 0;     // 회전 각도 저장
+    let scale = 1;             // 크기 배율 저장
+    let controlsWrapper = null; // 컨트롤 래퍼 요소
 
     // 요소의 실제 위치와 스타일 가져오기 (정확한 계산을 위해 개선)
     function getElementPosition(el) {
@@ -929,79 +932,44 @@ document.addEventListener("DOMContentLoaded", function() {
 
     // 요소 위치 업데이트
     function updatePosition(x, y) {
-        if (!clonedElement) return;
+        if (!activeElement) return;
         
         const deltaX = x - startX;
         const deltaY = y - startY;
         
         if (transformMode) {
-            // transform 속성 사용
-            clonedElement.style.transform = `translate(${initialLeft + deltaX}px, ${initialTop + deltaY}px)`;
+            // transform 속성 사용 (회전 및 크기 조정 포함)
+            activeElement.style.transform = `translate(${initialLeft + deltaX}px, ${initialTop + deltaY}px) rotate(${rotationAngle}deg) scale(${scale})`;
         } else {
-            // top/left 속성 사용
-            clonedElement.style.left = `${initialLeft + deltaX}px`;
-            clonedElement.style.top = `${initialTop + deltaY}px`;
+            // top/left 속성 사용 (회전 및 크기 조정 포함)
+            activeElement.style.left = `${initialLeft + deltaX}px`;
+            activeElement.style.top = `${initialTop + deltaY}px`;
+            activeElement.style.transform = `rotate(${rotationAngle}deg) scale(${scale})`;
         }
+        
+        // 컨트롤 업데이트
+        if (controlsWrapper) {
+            updateControlsPosition();
+        }
+    }
+
+    // 컨트롤 위치 업데이트 함수
+    function updateControlsPosition() {
+        if (!activeElement || !controlsWrapper) return;
+        
+        const rect = activeElement.getBoundingClientRect();
+        const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        
+        controlsWrapper.style.left = `${rect.left + scrollLeft}px`;
+        controlsWrapper.style.top = `${rect.top + scrollTop}px`;
+        controlsWrapper.style.width = `${rect.width}px`;
+        controlsWrapper.style.height = `${rect.height}px`;
+        controlsWrapper.style.transform = `rotate(${rotationAngle}deg)`;
     }
 
     function onPointerMove(e) {
         if (!activeElement) return;
-        
-        // 첫 움직임에서 요소 복제
-        if (!clonedElement) {
-            // 복제하기 전에 원본 요소의 정확한 위치와 크기 정보 저장
-            if (!originalRect) {
-                originalRect = getElementPosition(activeElement);
-            }
-            
-            // 요소 복제
-            clonedElement = activeElement.cloneNode(true);
-            
-            // 복제된 요소에 고유 ID 부여 (충돌 방지)
-            if (clonedElement.id) {
-                clonedElement.id = clonedElement.id + "_clone_" + Date.now();
-            } else {
-                clonedElement.id = "clone_" + Date.now();
-            }
-            
-            // 복제된 요소에 원본 요소의 정확한 스타일 적용
-            clonedElement.style.position = "absolute"; // 항상 absolute로 설정
-            clonedElement.style.margin = "0"; // 마진 제거
-            clonedElement.style.cursor = "move";
-            clonedElement.style.touchAction = "none";
-            clonedElement.style.opacity = "0.9"; // 약간 투명하게 하여 구분
-            clonedElement.style.zIndex = "1000"; // 다른 요소보다 위에 표시
-            
-            // 정확한 크기 설정
-            clonedElement.style.width = `${originalRect.rect.width}px`;
-            clonedElement.style.height = `${originalRect.rect.height}px`;
-            
-            // transformMode에 따라 위치 설정
-            if (transformMode) {
-                initialLeft = originalRect.left;
-                initialTop = originalRect.top;
-                clonedElement.style.transform = `translate(${initialLeft}px, ${initialTop}px)`;
-            } else {
-                // 절대 위치 설정 (스크롤 고려)
-                const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-                const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-                
-                initialLeft = originalRect.rect.left + scrollLeft;
-                initialTop = originalRect.rect.top + scrollTop;
-                
-                clonedElement.style.left = `${initialLeft}px`;
-                clonedElement.style.top = `${initialTop}px`;
-            }
-            
-            // 클래스 추가
-            clonedElement.classList.add('dragging', 'cloned');
-            
-            // 복제된 요소에 이벤트 리스너 추가 (드래그 가능하도록)
-            clonedElement.addEventListener("pointerdown", onElementPointerDown);
-            
-            // 페이지에 추가
-            document.body.appendChild(clonedElement);
-        }
         
         e.preventDefault();
         
@@ -1021,22 +989,15 @@ document.addEventListener("DOMContentLoaded", function() {
         // 최종 위치 확정
         if (rafId) {
             cancelAnimationFrame(rafId);
-            if (clonedElement) {
-                updatePosition(e.clientX, e.clientY);
-            }
+            updatePosition(e.clientX, e.clientY);
             rafId = null;
         }
         
-        // 복제된 요소에 dragging 클래스 제거
-        if (clonedElement) {
-            clonedElement.classList.remove('dragging');
-            clonedElement.style.opacity = "1"; // 불투명도 복원
-        }
+        // 드래그 완료 후 컨트롤 표시
+        showTransformControls(activeElement);
         
         activeElement.releasePointerCapture(e.pointerId);
         activeElement = null;
-        clonedElement = null;
-        originalRect = null; // 위치 정보 초기화
     }
 
     // 요소에 대한 pointerdown 이벤트 핸들러
@@ -1044,32 +1005,292 @@ document.addEventListener("DOMContentLoaded", function() {
         e.preventDefault();
         e.stopPropagation();
         
-        // 다른 드래그 중인 작업 중단
-        if (activeElement) {
-            activeElement.releasePointerCapture(e.pointerId);
-            if (clonedElement) {
-                clonedElement.classList.remove('dragging');
+        // 컨트롤 제거
+        removeTransformControls();
+        
+        // 이미지의 원본 여부 확인
+        const isOriginalElement = !this.classList.contains('cloned');
+        
+        if (isOriginalElement) {
+            // 원본 이미지인 경우 -> 복제 후 드래그
+            // 요소 복제
+            clonedElement = this.cloneNode(true);
+            
+            // 복제된 요소에 고유 ID 부여 (충돌 방지)
+            if (clonedElement.id) {
+                clonedElement.id = clonedElement.id + "_clone_" + Date.now();
+            } else {
+                clonedElement.id = "clone_" + Date.now();
             }
-            clonedElement = null;
-            originalRect = null;
+            
+            // 복제된 요소에 원본 요소의 정확한 스타일 적용
+            originalRect = getElementPosition(this);
+            
+            clonedElement.style.position = "absolute"; // 항상 absolute로 설정
+            clonedElement.style.margin = "0"; // 마진 제거
+            clonedElement.style.cursor = "move";
+            clonedElement.style.touchAction = "none";
+            clonedElement.style.zIndex = "1000"; // 다른 요소보다 위에 표시
+            
+            // 정확한 크기 설정
+            clonedElement.style.width = `${originalRect.rect.width}px`;
+            clonedElement.style.height = `${originalRect.rect.height}px`;
+            
+            // 여기서 위치 설정 부분을 수정
+            const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+            const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+            
+            // 변경: 요소의 원래 위치를 정확히 계산
+            initialLeft = originalRect.rect.left + scrollLeft;
+            initialTop = originalRect.rect.top + scrollTop;
+            
+            // transformMode에 관계없이 항상 left/top 속성 사용 (초기 위치 보장)
+            clonedElement.style.left = `${initialLeft}px`;
+            clonedElement.style.top = `${initialTop}px`;
+            clonedElement.style.transform = ''; // 초기 transform 제거
+            
+            // 클래스 추가 (복제된 요소임을 표시)
+            clonedElement.classList.add('cloned');
+            
+            // 복제된 요소에 이벤트 리스너 추가 (드래그 가능하도록)
+            clonedElement.addEventListener("pointerdown", onElementPointerDown);
+            
+            // 페이지에 추가
+            document.body.appendChild(clonedElement);
+            
+            // 복제된 요소를 활성 요소로 설정
+            activeElement = clonedElement;
+            transformMode = false; // 초기에는 transform 모드 사용하지 않음
+            rotationAngle = 0; // 회전 각도 초기화
+            scale = 1; // 스케일 초기화
+        } else {
+            // 복제된 요소는 그냥 드래그만
+            activeElement = this;
+            
+            // 현재 transform 값에서 회전 및 스케일 추출
+            const transformValue = window.getComputedStyle(this).transform;
+            if (transformValue && transformValue !== 'none') {
+                const matrix = new DOMMatrixReadOnly(transformValue);
+                // 회전 각도 계산 (radian에서 degree로 변환)
+                rotationAngle = Math.round(Math.atan2(matrix.b, matrix.a) * (180/Math.PI));
+                // 스케일 계산
+                scale = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
+            } else {
+                rotationAngle = 0;
+                scale = 1;
+            }
+            
+            // 위치 정보 저장
+            originalRect = getElementPosition(this);
+            initialLeft = originalRect.left;
+            initialTop = originalRect.top;
+            transformMode = originalRect.useTransform;
         }
-        
-        // 현재 요소의 정확한 위치와 크기 정보 저장
-        originalRect = getElementPosition(this);
-        
-        // 위치 정보 저장
-        initialLeft = originalRect.left;
-        initialTop = originalRect.top;
-        transformMode = originalRect.useTransform;
         
         // 현재 포인터 위치 저장
         startX = e.clientX;
         startY = e.clientY;
         
-        // 활성 요소 설정
-        activeElement = this;
-        this.setPointerCapture(e.pointerId);
+        activeElement.setPointerCapture(e.pointerId);
+        activeElement.classList.add('dragging');
     }
+
+    // 변형 컨트롤 표시 함수
+    function showTransformControls(element) {
+        removeTransformControls(); // 기존 컨트롤 제거
+        
+        if (!element || element.classList.contains('control-element')) return;
+        
+        const rect = element.getBoundingClientRect();
+        const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+        const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        
+        // 컨트롤 래퍼 생성
+        controlsWrapper = document.createElement('div');
+        controlsWrapper.className = 'transform-controls-wrapper';
+        controlsWrapper.style.position = 'absolute';
+        controlsWrapper.style.left = `${rect.left + scrollLeft}px`;
+        controlsWrapper.style.top = `${rect.top + scrollTop}px`;
+        controlsWrapper.style.width = `${rect.width}px`;
+        controlsWrapper.style.height = `${rect.height}px`;
+        controlsWrapper.style.pointerEvents = 'none';
+        controlsWrapper.style.zIndex = '2000';
+        controlsWrapper.style.transform = `rotate(${rotationAngle}deg)`;
+        
+        // 회전 핸들 생성
+        const rotateHandle = document.createElement('div');
+        rotateHandle.className = 'rotate-handle control-element';
+        rotateHandle.style.position = 'absolute';
+        rotateHandle.style.top = '-30px';
+        rotateHandle.style.left = '50%';
+        rotateHandle.style.marginLeft = '-10px';
+        rotateHandle.style.width = '20px';
+        rotateHandle.style.height = '20px';
+        rotateHandle.style.borderRadius = '50%';
+        rotateHandle.style.backgroundColor = '#4285f4';
+        rotateHandle.style.cursor = 'grab';
+        rotateHandle.style.pointerEvents = 'auto';
+        rotateHandle.style.boxShadow = '0 0 0 1px white, 0 0 0 2px rgba(0,0,0,0.2)';
+        
+        // 회전 핸들과 이미지 연결선
+        const rotateConnector = document.createElement('div');
+        rotateConnector.className = 'rotate-connector';
+        rotateConnector.style.position = 'absolute';
+        rotateConnector.style.top = '10px';
+        rotateConnector.style.left = '50%';
+        rotateConnector.style.width = '2px';
+        rotateConnector.style.height = '20px';
+        rotateConnector.style.backgroundColor = '#4285f4';
+        rotateConnector.style.transform = 'translateX(-50%)';
+        rotateConnector.style.pointerEvents = 'none';
+        
+        // 크기 조절 핸들 (오른쪽 아래)
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'resize-handle control-element';
+        resizeHandle.style.position = 'absolute';
+        resizeHandle.style.bottom = '-10px';
+        resizeHandle.style.right = '-10px';
+        resizeHandle.style.width = '20px';
+        resizeHandle.style.height = '20px';
+        resizeHandle.style.borderRadius = '50%';
+        resizeHandle.style.backgroundColor = '#4285f4';
+        resizeHandle.style.cursor = 'nwse-resize';
+        resizeHandle.style.pointerEvents = 'auto';
+        resizeHandle.style.boxShadow = '0 0 0 1px white, 0 0 0 2px rgba(0,0,0,0.2)';
+        
+        // 회전 이벤트 처리
+        let rotateStartAngle = rotationAngle;
+        let rotateStartX, rotateStartY;
+        
+        rotateHandle.addEventListener('pointerdown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const elementRect = element.getBoundingClientRect();
+            const elementCenterX = elementRect.left + elementRect.width / 2;
+            const elementCenterY = elementRect.top + elementRect.height / 2;
+            
+            rotateStartX = e.clientX;
+            rotateStartY = e.clientY;
+            rotateStartAngle = rotationAngle;
+            
+            // 회전 각도 계산 함수
+            function onRotateMove(moveEvent) {
+                const startAngle = Math.atan2(
+                    rotateStartY - elementCenterY,
+                    rotateStartX - elementCenterX
+                );
+                const currentAngle = Math.atan2(
+                    moveEvent.clientY - elementCenterY,
+                    moveEvent.clientX - elementCenterX
+                );
+                
+                // 각도 차이 계산 (라디안 -> 도)
+                const angleDiff = (currentAngle - startAngle) * (180 / Math.PI);
+                rotationAngle = Math.round(rotateStartAngle + angleDiff);
+                
+                // 요소 회전 업데이트
+                if (transformMode) {
+                    element.style.transform = `translate(${initialLeft}px, ${initialTop}px) rotate(${rotationAngle}deg) scale(${scale})`;
+                } else {
+                    element.style.transform = `rotate(${rotationAngle}deg) scale(${scale})`;
+                }
+                
+                // 컨트롤 회전 업데이트
+                controlsWrapper.style.transform = `rotate(${rotationAngle}deg)`;
+            }
+            
+            // 포인터 업 이벤트 처리
+            function onRotateUp() {
+                document.removeEventListener('pointermove', onRotateMove);
+                document.removeEventListener('pointerup', onRotateUp);
+            }
+            
+            document.addEventListener('pointermove', onRotateMove);
+            document.addEventListener('pointerup', onRotateUp);
+            
+            rotateHandle.setPointerCapture(e.pointerId);
+        });
+        
+        // 크기 조절 이벤트 처리
+        let resizeStartScale = scale;
+        let resizeStartX, resizeStartY, initialDiagonal;
+        
+        resizeHandle.addEventListener('pointerdown', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const elementRect = element.getBoundingClientRect();
+            resizeStartX = e.clientX;
+            resizeStartY = e.clientY;
+            resizeStartScale = scale;
+            
+            // 이미지의 중심점에서 포인터까지의 초기 대각선 거리 계산
+            const centerX = elementRect.left + elementRect.width / 2;
+            const centerY = elementRect.top + elementRect.height / 2;
+            initialDiagonal = Math.sqrt(
+                Math.pow(resizeStartX - centerX, 2) + 
+                Math.pow(resizeStartY - centerY, 2)
+            );
+            
+            // 크기 조절 함수
+            function onResizeMove(moveEvent) {
+                const currentDiagonal = Math.sqrt(
+                    Math.pow(moveEvent.clientX - centerX, 2) + 
+                    Math.pow(moveEvent.clientY - centerY, 2)
+                );
+                
+                // 크기 비율 계산
+                const scaleFactor = currentDiagonal / initialDiagonal;
+                scale = Math.max(0.1, Math.min(5, resizeStartScale * scaleFactor)); // 최소 0.1, 최대 5배로 제한
+                
+                // 요소 업데이트
+                if (transformMode) {
+                    element.style.transform = `translate(${initialLeft}px, ${initialTop}px) rotate(${rotationAngle}deg) scale(${scale})`;
+                } else {
+                    element.style.transform = `rotate(${rotationAngle}deg) scale(${scale})`;
+                }
+                
+                // 컨트롤 위치 업데이트
+                updateControlsPosition();
+            }
+            
+            // 포인터 업 이벤트 처리
+            function onResizeUp() {
+                document.removeEventListener('pointermove', onResizeMove);
+                document.removeEventListener('pointerup', onResizeUp);
+            }
+            
+            document.addEventListener('pointermove', onResizeMove);
+            document.addEventListener('pointerup', onResizeUp);
+            
+            resizeHandle.setPointerCapture(e.pointerId);
+        });
+        
+        // 컨트롤 추가
+        rotateHandle.appendChild(rotateConnector);
+        controlsWrapper.appendChild(rotateHandle);
+        controlsWrapper.appendChild(resizeHandle);
+        document.body.appendChild(controlsWrapper);
+    }
+    
+    // 변형 컨트롤 제거 함수
+    function removeTransformControls() {
+        const existingControls = document.querySelector('.transform-controls-wrapper');
+        if (existingControls) {
+            existingControls.remove();
+        }
+        controlsWrapper = null;
+    }
+
+    // 문서 클릭 시 컨트롤 제거
+    document.addEventListener('click', function(e) {
+        if (!e.target.classList.contains('control-element') && 
+            !e.target.classList.contains('cloned') && 
+            !e.target.matches(selector)) {
+            removeTransformControls();
+        }
+    });
 
     // 문서 레벨에서 이벤트 리스너 등록
     document.addEventListener("pointermove", onPointerMove, { passive: false });
