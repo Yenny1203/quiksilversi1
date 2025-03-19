@@ -886,6 +886,91 @@ document.addEventListener("DOMContentLoaded", function() {
     let rotationAngle = 0;     // 회전 각도 저장
     let scale = 1;             // 크기 배율 저장
     let controlsWrapper = null; // 컨트롤 래퍼 요소
+    
+    // 작업 기록을 저장할 배열 추가
+    let undoStack = [];
+    const MAX_UNDO_STEPS = 20; // 최대 실행 취소 단계 수
+    
+    // 작업 상태를 저장하는 함수
+    function saveState(element, action) {
+        if (!element) return;
+        
+        // 이미 스택에 너무 많은 단계가 있으면 가장 오래된 것 제거
+        if (undoStack.length >= MAX_UNDO_STEPS) {
+            undoStack.shift();
+        }
+        
+        // 요소의 현재 상태 저장
+        const state = {
+            action: action,                // 'create', 'move', 'rotate', 'resize'
+            elementId: element.id,         // 요소 ID
+            left: element.style.left,      // 왼쪽 위치
+            top: element.style.top,        // 위쪽 위치
+            transform: element.style.transform, // 변환(회전, 크기)
+            element: element               // 요소 자체에 대한 참조
+        };
+        
+        undoStack.push(state);
+        
+        // 실행 취소 버튼 활성화
+        updateUndoButton();
+    }
+    
+    // 실행 취소 버튼 상태 업데이트
+    function updateUndoButton() {
+        const undoButton = document.getElementById('undo-button');
+        if (undoButton) {
+            undoButton.disabled = undoStack.length === 0;
+            undoButton.style.opacity = undoStack.length === 0 ? "0.5" : "1";
+        }
+    }
+    
+    // 뒤로 돌아가기(실행 취소) 기능 구현
+    function undoLastAction() {
+        if (undoStack.length === 0) return;
+        
+        // 마지막 작업 가져오기
+        const lastState = undoStack.pop();
+        
+        if (lastState.action === 'create') {
+            // 요소 생성 작업 취소 - 요소 제거
+            lastState.element.remove();
+            
+            // 관련 컨트롤도 제거
+            removeTransformControls();
+        } else if (lastState.action === 'move' || lastState.action === 'rotate' || lastState.action === 'resize') {
+            // 이동, 회전, 크기 조정 작업 취소 - 이전 상태로 복원
+            const element = document.getElementById(lastState.elementId);
+            if (element) {
+                element.style.left = lastState.left;
+                element.style.top = lastState.top;
+                element.style.transform = lastState.transform;
+                
+                // 회전 각도와 크기 정보 추출 (컨트롤 업데이트를 위해)
+                const transformValue = window.getComputedStyle(element).transform;
+                if (transformValue && transformValue !== 'none') {
+                    const matrix = new DOMMatrixReadOnly(transformValue);
+                    rotationAngle = Math.round(Math.atan2(matrix.b, matrix.a) * (180/Math.PI));
+                    scale = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
+                } else {
+                    rotationAngle = 0;
+                    scale = 1;
+                }
+                
+                // 위치 정보 업데이트
+                const position = getElementPosition(element);
+                initialLeft = position.left;
+                initialTop = position.top;
+                transformMode = position.useTransform;
+                
+                // 컨트롤 업데이트
+                showTransformControls(element);
+            }
+        }
+        
+        // 실행 취소 버튼 상태 업데이트
+        updateUndoButton();
+    }
 
     // 요소의 실제 위치와 스타일 가져오기 (정확한 계산을 위해 개선)
     function getElementPosition(el) {
@@ -993,6 +1078,9 @@ document.addEventListener("DOMContentLoaded", function() {
             rafId = null;
         }
         
+        // 작업 상태 저장 (이동 작업)
+        saveState(activeElement, 'move');
+        
         // 드래그 완료 후 컨트롤 표시
         showTransformControls(activeElement);
         
@@ -1057,6 +1145,9 @@ document.addEventListener("DOMContentLoaded", function() {
             
             // 페이지에 추가
             document.body.appendChild(clonedElement);
+            
+            // 작업 상태 저장 (생성 작업)
+            saveState(clonedElement, 'create');
             
             // 복제된 요소를 활성 요소로 설정
             activeElement = clonedElement;
@@ -1166,6 +1257,9 @@ document.addEventListener("DOMContentLoaded", function() {
             e.preventDefault();
             e.stopPropagation();
             
+            // 회전 작업 시작 전에 현재 상태 저장
+            saveState(element, 'rotate');
+            
             const elementRect = element.getBoundingClientRect();
             const elementCenterX = elementRect.left + elementRect.width / 2;
             const elementCenterY = elementRect.top + elementRect.height / 2;
@@ -1219,6 +1313,9 @@ document.addEventListener("DOMContentLoaded", function() {
         resizeHandle.addEventListener('pointerdown', function(e) {
             e.preventDefault();
             e.stopPropagation();
+            
+            // 크기 조절 작업 시작 전에 현재 상태 저장
+            saveState(element, 'resize');
             
             const elementRect = element.getBoundingClientRect();
             resizeStartX = e.clientX;
@@ -1306,6 +1403,47 @@ document.addEventListener("DOMContentLoaded", function() {
         // 드래그 시작 이벤트
         element.addEventListener("pointerdown", onElementPointerDown);
     });
+    
+    // 뒤로 돌아가기(실행 취소) 버튼 생성 및 추가
+    function createUndoButton() {
+        // 이미 존재하는지 확인
+        if (document.getElementById('undo-button')) return;
+        
+        const undoButton = document.createElement('button');
+        undoButton.id = 'undo-button';
+        undoButton.innerHTML = '↩️ UNDO';
+        undoButton.style.position = 'fixed';
+        undoButton.style.top = '190px';
+        undoButton.style.right = '250px';
+        undoButton.style.padding = '8px 16px';
+        undoButton.style.backgroundColor = '#568DA1';
+        undoButton.style.color = 'white';
+        undoButton.style.border = 'none';
+        undoButton.style.borderRadius = '4px';
+        undoButton.style.fontSize = '16px';
+        undoButton.style.cursor = 'pointer';
+        undoButton.style.zIndex = '3000';  // 다른 요소들보다 위에 표시
+        undoButton.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+        undoButton.disabled = true;
+        undoButton.style.opacity = "0.5";
+        
+        undoButton.addEventListener('click', function() {
+            undoLastAction();
+        });
+        
+        // 키보드 단축키 추가 (Ctrl+Z)
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                e.preventDefault();
+                undoLastAction();
+            }
+        });
+        
+        document.body.appendChild(undoButton);
+    }
+    
+    // 버튼 생성
+    createUndoButton();
 });
 </script>
 
